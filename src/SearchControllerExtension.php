@@ -34,7 +34,7 @@ class SearchControllerExtension extends DataExtension {
 		// create our search form fields
         $fields = FieldList::create();
 		
-		$placeholder_text = 'Keywords';
+		$placeholder_text = 'Search...';
 		if (Config::inst()->get('PlasticStudio\Search\SearchPageController', 'search_form_placeholder_text')) {
 			$placeholder_text = Config::inst()->get('PlasticStudio\Search\SearchPageController', 'search_form_placeholder_text');
 		}
@@ -48,7 +48,7 @@ class SearchControllerExtension extends DataExtension {
 		// don't do action here, set below for 404 error page fix
 		// fix breaks pagination, reinstating
         $actions = FieldList::create(
-            FormAction::create("doSearchForm")->setTitle($submit_button_text)
+            FormAction::create("doSearchForm")->setTitle($submit_button_text)->addExtraClass('c-button')
         );
 		
 		// now build the actual form object

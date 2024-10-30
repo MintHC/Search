@@ -7,63 +7,98 @@ use SilverStripe\View\SSViewer;
 use SilverStripe\CMS\Model\SiteTree;
 use SilverStripe\Core\Config\Config;
 use SilverStripe\ORM\Queries\SQLUpdate;
+use SilverStripe\Subsites\Model\Subsite;
+use SilverStripe\Core\Injector\Injector;
+use SilverStripe\ORM\ArrayList;
 
 class IndexPageContentForSearchTask extends BuildTask
 {
     protected $title = 'Index Page Content for Search';
- 
-    protected $description = 'Collate all page content from elements and save to a field for search. Add optional query string, "reindex=true" to reindex all pages.';
- 
+
+    protected $description = 'Collate all page content from elements and save to a field for search. Add optional query string, "reindex=true" to reindex all pages across all subsites.';
+
     public function run($request)
     {
         $reindex = $request->getVar('reindex');
-        $offset = $request->getVar('offset') ? $request->getVar('offset') : NULL;
-        $limit = $request->getVar('limit') ? $request->getVar('limit') : 10;
+        $offset = $request->getVar('offset') ? (int)$request->getVar('offset') : 0;
+        $limit = $request->getVar('limit') ? (int)$request->getVar('limit') : 10;
 
-        // select all sitetree items
-        $items = SiteTree::get()->limit($limit, $offset);
-        echo 'Running...<br />';
-        echo 'limit: ' . $limit . '<br />';
-        echo 'offset: ' . $offset . '<br />';
-        // echo 'count ' . $items->Count(). '<br />';
+        // Store the original subsite ID to restore later
+        $originalSubsiteID = Subsite::currentSubsiteID();
 
-        if(!$reindex) {
-            $items = $items->filter(['ElementalSearchContent' => null]);
-            echo 'Running - generating first index...<br />';
+        // Fetch all subsites
+        $subsites = Subsite::get();
+
+        // Initialize an ArrayList to hold all sites, including the main site
+        $allSites = new ArrayList();
+
+        // Create a representation of the main site (ID = 0)
+        $mainSubsite = Injector::inst()->create(Subsite::class);
+        $mainSubsite->ID = 0;
+        $mainSubsite->Title = 'Main Site'; // Optional: Set a title for clarity
+        $allSites->push($mainSubsite);
+
+        // Add all existing subsites to the ArrayList
+        if ($subsites->exists()) {
+            foreach ($subsites as $subsite) {
+                $allSites->push($subsite);
+            }
         }
 
-        if(!$items->count()) {
-            echo 'No items to update.<br />';
-        } else {
+        echo 'Starting reindexing process for all subsites, including the Main Site...<br />';
 
-            foreach ($items as $item) {
-                
-                // get the page content as plain content string
-                $content = $this->collateSearchContent($item);
+        foreach ($allSites as $subsite) {
+            // Change context to the current subsite
+            Subsite::changeSubsite($subsite->ID);
+            echo "<h2>Reindexing Subsite: {$subsite->Title} (ID: {$subsite->ID})</h2>";
 
-                // Update this item in db
-                $update = SQLUpdate::create();
-                $update->setTable('"SiteTree"');
-                $update->addWhere(['ID' => $item->ID]);
-                $update->addAssignments([
-                    '"ElementalSearchContent"' => $content
-                ]);
-                $update->execute();
+            // Retrieve SiteTree items for the current subsite with pagination
+            $items = SiteTree::get()->limit($limit, $offset);
+            echo 'Limit: ' . $limit . '<br />';
+            echo 'Offset: ' . $offset . '<br />';
 
-                // IF page is published, update the live table
-                if ($item->isPublished()) {
+            if (!$reindex) {
+                $items = $items->filter(['ElementalSearchContent' => null]);
+                echo 'Generating first index for new items...<br />';
+            }
+
+            if (!$items->count()) {
+                echo 'No items to update in this subsite.<br />';
+            } else {
+                foreach ($items as $item) {
+                    // Get the page content as plain content string
+                    $content = $this->collateSearchContent($item);
+
+                    // Update this item in the database
                     $update = SQLUpdate::create();
-                    $update->setTable('"SiteTree_Live"');
+                    $update->setTable('"SiteTree"');
                     $update->addWhere(['ID' => $item->ID]);
                     $update->addAssignments([
                         '"ElementalSearchContent"' => $content
                     ]);
                     $update->execute();
-                }
 
-                echo '<p>Page ' . $item->Title . ' indexed.</p>' . PHP_EOL;
+                    // If the page is published, update the live table
+                    if ($item->isPublished()) {
+                        $update = SQLUpdate::create();
+                        $update->setTable('"SiteTree_Live"');
+                        $update->addWhere(['ID' => $item->ID]);
+                        $update->addAssignments([
+                            '"ElementalSearchContent"' => $content
+                        ]);
+                        $update->execute();
+                    }
+
+                    echo '<p>Page "' . $item->Title . '" indexed.</p>' . PHP_EOL;
+                }
             }
+
+            echo '<hr />';
         }
+
+        // Restore the original subsite context
+        Subsite::changeSubsite($originalSubsiteID);
+        echo 'Reindexing process completed for all subsites, including the Main Site.<br />';
     }
 
     /**
@@ -73,10 +108,7 @@ class IndexPageContentForSearchTask extends BuildTask
      */
     private function collateSearchContent($page): string
     {
-        // Get the page
-        /** @var SiteTree $page */
-        // $page = $this->getOwner();
-
+        // Get the page content
         $content = '';
 
         if (self::isElementalPage($page)) {
@@ -87,34 +119,38 @@ class IndexPageContentForSearchTask extends BuildTask
         return $content;
     }
 
-
     /**
+     * Determine if the page has the ElementalPageExtension
+     *
      * @param SiteTree $page
      * @return bool
      */
     private static function isElementalPage($page)
     {
-        return $page::has_extension("DNADesign\Elemental\Extensions\ElementalPageExtension");
+        return $page->hasExtension("DNADesign\Elemental\Extensions\ElementalPageExtension");
     }
 
     /**
-     * @return string|string[]|null
+     * Collate search content from Elemental elements
+     *
+     * @param SiteTree $page
+     * @return string
      */
     private function collateSearchContentFromElements($page)
     {
-        // Get the original theme
+        // Get the original themes
         $originalThemes = SSViewer::get_themes();
 
-        // Init content
+        // Initialize content
         $content = '';
 
         try {
-            // Enable frontend themes in order to correctly render the elements as they would be for the frontend
+            // Enable frontend themes to correctly render the elements as they would for the frontend
             Config::nest();
             SSViewer::set_themes(SSViewer::config()->get('themes'));
 
-            // Get the elements content
-            $content .= $page->getOwner()->getElementsForSearch();
+            // Get the elements' content
+            $content .= $page->getElementsForSearch();
 
             // Clean up the content
             $content = preg_replace('/\s+/', ' ', $content);
@@ -122,11 +158,10 @@ class IndexPageContentForSearchTask extends BuildTask
             // Return themes back for the CMS
             Config::unnest();
         } finally {
-            // Restore themes
+            // Restore original themes
             SSViewer::set_themes($originalThemes);
         }
 
         return $content;
     }
-
 }
