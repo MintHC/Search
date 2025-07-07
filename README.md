@@ -14,6 +14,12 @@ The built-in SilverStripe search form is a very simple search engine. This plugi
 * Run `dev/build` to instansiate your new configuration (this will also automatically create an instance of `SearchPage` if one does not exist).
 * To overwrite the default `SearchPage` tmeplate, add a template file to your application: `templates/PlasticStudio/Search/Layout/SearchPage.ss`
 
+## Upgrading from jaedb/search
+
+Ensure you review the search config and update it to match the example config in this repo. Key changes:
+
+1. `Table: 'SiteTree_Live'` -> `Table: 'Page_Live'`
+2. Add `JoinTables: ['SiteTree_Live']`
 
 # Elemental
 
@@ -44,6 +50,7 @@ The built-in SilverStripe search form is a very simple search engine. This plugi
  * `sorts`: associative list of sort options. These are used to popoulate a "Sort by" dropdown field in the Advanced Search Form. Sort order of search results will default to the top item in this list.
    * `Label`: front-end field label
    * `Sort`: SQL sort string
+* `search_form_placeholder_text`: Change search input field placeholder text (defaults to "Keywords")
 * `submit_button_text`: Text to use on search form submit button (defaults to "Search")
 
 TODO: `defaults`: Default attributes or settings, as opposed to those submitted through the search form.
@@ -127,6 +134,7 @@ PlasticStudio\Search\SearchPageController:
     published_desc:
       Label: 'Publish date (oldest first)'
       Sort: 'DatePublished ASC'
+  search_form_placeholder_text: 'Keywords'
   submit_button_text: 'Go'
   ## TODO:
   ## defaults:
